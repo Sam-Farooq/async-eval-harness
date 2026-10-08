@@ -38,8 +38,8 @@ Not a pass rate. The manifest splits the suite:
 Any regression in `pass_to_pass` scores **0.0** outright, not a deduction. A
 patch that fixes the leak by breaking the retry path has not fixed the leak.
 
-Partial credit exists only within `fail_to_pass`: resolving three of four
-scores 0.75 and still reports `passed: false`.
+Partial credit exists only within `fail_to_pass`: resolving six of the nine
+scores 0.667 and still reports `passed: false`.
 
 ## What it took to make the scoring hard to fake
 
@@ -112,12 +112,13 @@ python tools/make_solution.py
 
 ```json
 {
-  "fail_to_pass_resolved": 4,
+  "fail_to_pass_resolved": 9,
   "failure_reason": "",
   "instance_id": "asyncq-001-cancel-and-leak",
+  "over_budget": false,
   "pass_to_pass_broken": 0,
   "passed": true,
-  "runtime_seconds": 0.21,
+  "runtime_seconds": 0.25,
   "score": 1.0
 }
 ```

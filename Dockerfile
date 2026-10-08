@@ -29,7 +29,7 @@ RUN chown -R runner:runner /bench
 USER runner
 
 # The default run is the baseline, which is expected to fail: four
-# fail_to_pass tests red, exit 1. That is the correct state of an unsolved
+# nine fail_to_pass tests red, exit 1. That is the correct state of an unsolved
 # instance, so do not treat a non-zero exit here as a broken image.
 ENTRYPOINT ["python", "verify.py"]
 CMD ["--no-patch"]
