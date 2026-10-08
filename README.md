@@ -30,9 +30,9 @@ stopped working" with no traceback anywhere.
 
 Not a pass rate. The manifest splits the suite:
 
-- **`fail_to_pass`** (4 tests) are red on the unmodified tree and must be green
-  after the patch. This is what the patch is for.
-- **`pass_to_pass`** (7 tests) are green before and must stay green. This is
+- **`fail_to_pass`** (9 node ids) are red on the unmodified tree and must be
+  green after the patch. This is what the patch is for.
+- **`pass_to_pass`** (7 node ids) are green before and must stay green. This is
   what the patch must not break.
 
 Any regression in `pass_to_pass` scores **0.0** outright, not a deduction. A
@@ -41,24 +41,59 @@ patch that fixes the leak by breaking the retry path has not fixed the leak.
 Partial credit exists only within `fail_to_pass`: resolving three of four
 scores 0.75 and still reports `passed: false`.
 
-## Closing the obvious routes
+## What it took to make the scoring hard to fake
 
-**Editing the tests.** The patch lands on the whole tree, so a candidate can
-delete the assertion it cannot satisfy. `verify.py` restores `tests/` and
-`manifest.json` from the pristine copy *after* applying the patch, so the only
-thing a patch can influence is `src/`. CI asserts this with a patch that
-neuters two assertions and checks it still scores 0.0.
+Four independent attackers were pointed at this harness with instructions to
+score 1.0 without fixing anything. All four succeeded, in nine distinct ways.
+Every one of them is now a regression test in `tools/attack_suite.py`.
 
-**Hanging instead of failing.** One defect presents as a deadlock, so a naive
-runner stalls rather than scoring. The suite has a hard 180s kill and a 120s
-budget, and an overrun is recorded as a failure with a reason, never as an
-infrastructure error.
+**Writes outside `src/`.** The worst of them: `patch(1)` follows `../` in a
+target path, so a diff could climb out of the sandbox, write into the pristine
+instance on disk, and have `restore_tests()` faithfully copy the attacker's own
+conftest back in. That one was persistent, so every later submission scored 1.0
+too, including the baseline, with nothing in the JSON to show it.
 
-**Run-to-run drift.** `PYTHONHASHSEED=0`, `TZ=UTC`, `LC_ALL=C`,
-`SOURCE_DATE_EPOCH` pinned, bytecode off. The hash seed is the one that
-actually bites: set iteration order decides which task a worker picks first,
-which changes the traceback text in a failure message. CI scores the same
-patch twice and diffs the result.
+The fix is a scope check that runs before `patch(1)` is invoked at all: every
+target path must be relative, free of `..`, and under `src/`. That single rule
+also closed a conftest dropped at the sandbox root, a plugin registered through
+`pyproject.toml`, and a straightforward edit to the test file. It additionally
+fixed a *false negative*, where a correct fix was rejected for the crime of also
+touching a README in the same diff.
+
+**A forged report.** The score was read from a JUnit file the candidate's own
+pytest process wrote, and `src/task_queue.py` is imported during collection, so
+an `atexit` hook could rewrite the report after pytest had finished with it. The
+report now lands outside the sandbox, and pytest's exit code is cross-checked
+against it: a report claiming all-pass alongside a non-zero exit is refused.
+
+**Hard-coded and partial fixes.** Every `fail_to_pass` test exposed exactly one
+observable, and each was a literal the test itself supplied. Special-casing the
+task id `"slow"`, or `max_results == 50`, scored 1.0 with all four defects
+intact. Task ids are now `uuid4`-based, the eviction cap is parameterised over
+three values, and the assertions moved from derived surfaces to mechanisms:
+
+| Was asserted | Now asserted | Attack it killed |
+|---|---|---|
+| `drain()` returns | `q._queue._unfinished_tasks == 0` | reimplementing `drain()` and leaving `_worker` byte-identical |
+| `q.completed <= cap` | `len(q._done) <= cap` | clamping the reported number without evicting |
+| `not isinstance(err, BaseException)` | nothing reachable from the task is a frame | a one-line wrapper that keeps the exception and delegates `__str__` |
+| one worker object still alive | 30 further tasks actually run | a supervisor that replaces dead workers is a valid fix and must pass |
+
+Two tests were added outright: eviction driven entirely by *failures*, because
+the original only submitted successes and so exercised one of the two record
+sites, and a cancellation landing in the retry backoff rather than in
+`task.fn()`.
+
+**A self-contradicting verdict.** The wall-clock budget set `passed: false`
+while leaving `score` at 1.0, so two consumers reading the same JSON disagreed
+about the same run. A slow grading host is a fact about the host, so it is now
+reported as `over_budget` and kept out of the score entirely.
+
+Run the lot:
+
+```
+python tools/attack_suite.py
+```
 
 ## The golden patch is generated, not written
 
@@ -112,18 +147,21 @@ The thing most likely to be silently wrong here is the benchmark itself. An
 instance whose golden patch does not pass, or whose baseline accidentally
 does, measures nothing, and no ordinary test suite would notice.
 
-So `instance-validity` asserts all three properties on every push: baseline
-fails with no `pass_to_pass` instability, golden patch scores exactly 1.0, and
-a test-tampering patch scores 0.0.
+So CI asserts it on every push: the baseline fails with no `pass_to_pass`
+instability, the golden patch scores exactly 1.0, `solution.patch` still matches
+what its generator produces, the same patch scores identically twice, and all
+nine attacks are refused.
 
 ## Layout
 
 ```
-src/task_queue.py       the implementation under test
-tests/test_verifier.py  11 tests, 4 fail_to_pass and 7 pass_to_pass
-manifest.json           the split, timeouts, and the test command
-verify.py               stage, patch, restore tests, run, score
+src/task_queue.py       the implementation under test, the only writable path
+tests/test_verifier.py  14 tests, 16 node ids: 9 fail_to_pass and 7 pass_to_pass
+manifest.json           the split, timeouts, writable paths, the test command
+verify.py               stage, scope-check, patch, restore, run, cross-check, score
 solution.patch          generated by tools/make_solution.py
+tools/attack_suite.py   nine patches that must not score
+tools/assert_result.py  what CI asserts about a result file
 task_prompt.md          what an evaluated model is shown
 ```
 
