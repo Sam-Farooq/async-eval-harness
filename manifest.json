@@ -1,0 +1,24 @@
+{
+  "instance_id": "asyncq-001-cancel-and-leak",
+  "language": "python",
+  "python_version": "3.11",
+  "under_test": "src/task_queue.py",
+  "test_command": ["-m", "pytest", "tests/", "-p", "no:cacheprovider"],
+  "timeout_seconds": 180,
+  "max_runtime_seconds": 120,
+  "fail_to_pass": [
+    "tests/test_verifier.py::test_drain_returns_after_a_worker_is_cancelled",
+    "tests/test_verifier.py::test_completed_tasks_do_not_accumulate_without_bound",
+    "tests/test_verifier.py::test_a_failed_task_does_not_retain_its_traceback",
+    "tests/test_verifier.py::test_a_worker_survives_a_task_that_raises_outside_exception"
+  ],
+  "pass_to_pass": [
+    "tests/test_verifier.py::test_a_successful_task_records_its_result",
+    "tests/test_verifier.py::test_submit_sheds_once_the_buffer_is_full",
+    "tests/test_verifier.py::test_a_flaky_task_succeeds_on_retry",
+    "tests/test_verifier.py::test_retries_stop_at_the_limit",
+    "tests/test_verifier.py::test_a_closed_queue_refuses_new_work",
+    "tests/test_verifier.py::test_tasks_do_not_leak_into_the_inflight_set",
+    "tests/test_verifier.py::test_a_thousand_tasks_all_complete"
+  ]
+}
